@@ -13,6 +13,7 @@ class invalid_PNG_chunk : public std::exception {
         }
 };
 class invalid_PNG_crc : public std::exception {
+    /* Error when PNG is not in default format */
     public:
         const char* what() const noexcept override {
             return "Invalid crc chunk, file can be corrupted.";

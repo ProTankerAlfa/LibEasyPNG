@@ -42,10 +42,10 @@ std::vector<unsigned char> descomprimir(std::vector<unsigned char>& comprimido, 
 
     auto x = libdeflate_zlib_decompress(descompressor, comprimido.data(), comprimido.size(), buffer.data(), espected_size, NULL);
 
-    if (x == LIBDEFLATE_SUCCESS) std::cout << "ok" << std::endl;
-    if (x == LIBDEFLATE_BAD_DATA) std::cout << "bad data" << std::endl;
-    if (x == LIBDEFLATE_INSUFFICIENT_SPACE) std::cout << "space" << std::endl;
-    if (x == LIBDEFLATE_SHORT_OUTPUT) std::cout << "output" << std::endl;
+    //if (x == LIBDEFLATE_SUCCESS) std::cout << "ok" << std::endl;
+    if (x == LIBDEFLATE_BAD_DATA) std::cerr << "bad data" << std::endl;
+    if (x == LIBDEFLATE_INSUFFICIENT_SPACE) std::cerr << "out space" << std::endl;
+    if (x == LIBDEFLATE_SHORT_OUTPUT) std::cerr << "short" << std::endl;
 
     libdeflate_free_decompressor(descompressor);
 

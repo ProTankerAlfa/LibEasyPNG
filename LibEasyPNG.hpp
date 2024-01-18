@@ -3,7 +3,6 @@
 #include "process.hpp"
 #include "errors.hpp"
 #include <vector>
-//#include <bitset>
 #include <zlib.h>
 #include <math.h>
 //#include <stdlib.h>
@@ -19,7 +18,8 @@ unsigned int arrayToInt(const vector<unsigned char>& array) {
 class PNG {
     public:
         unsigned int width, height;
-        unsigned short int bit_depth, color_type, interlace;
+        unsigned short int bit_depth, color_type, interlace, bytes_per_pixel;
+        vector<unsigned short int*> pixels;
 
         // Constructor PNG class start 
         PNG(string &file_path) : image(file_path.c_str(), ios::binary) {
@@ -64,9 +64,9 @@ class PNG {
                 }
                 if ((chunk_lenght % 3) != 0) throw invalid_PNG_chunk();
 
-                unsigned char* buffer;
+                unsigned short int* buffer;
                 for (unsigned int x = 0; x < chunk_lenght; x+=3) {
-                    buffer = new unsigned char[3];
+                    buffer = new unsigned short int[3];
 
                     buffer[0] = chunk_data[4+x];
                     buffer[1] = chunk_data[4+x+1];
@@ -76,14 +76,12 @@ class PNG {
                 }
             }
 
-            
-
             while (true) {
                 chunk_lenght = arrayToInt(read_bytes(4));
                 chunk_data = read_bytes(4+chunk_lenght); 
 
-                for (short int x = 0; x < 4; x++) cout << chunk_data[x];
-                cout << endl;
+                //for (short int x = 0; x < 4; x++) cout << chunk_data[x];
+                //cout << endl;
 
                 {
                     crc = arrayToInt(read_bytes(4));
@@ -105,8 +103,7 @@ class PNG {
                 if (equal(chunk_data.begin(), chunk_data.begin()+4, "IDAT")) {
                     chunk_data.erase(chunk_data.begin(), chunk_data.begin()+4);
 
-                    idat_chunk_data.insert(idat_chunk_data.end(), chunk_data.begin(), chunk_data.end());
-                    //printf("Size: %u Expected %u\n", chunk_data.size(), expected_size);      
+                    idat_chunk_data.insert(idat_chunk_data.end(), chunk_data.begin(), chunk_data.end());  
                 }
                 
             }
@@ -119,15 +116,16 @@ class PNG {
                 image.close();
             }
             for (auto& pixel : color_palet) {delete[] pixel;}
+            for (auto& row : pixels) delete[] row;
+            pixels.clear();
         } // End destructor
 
     private:
         ifstream image;
-        vector<unsigned char*> color_palet;
+        vector<unsigned short int*> color_palet;
         vector<unsigned char> idat_chunk_data;
-        vector<unsigned char*> pixels_array;
-        unsigned short int bytes_per_pixel;
         unsigned int width_total_size;
+        vector<unsigned char> vector_buffer;
         
         vector<unsigned char> read_bytes(const unsigned int lenght) {
             vector<unsigned char> buffer;
@@ -192,26 +190,26 @@ class PNG {
                     bytes_per_pixel = 4;
                     break;
             }
-            width_total_size = (width * bytes_per_pixel * bit_depth / 8) + 1;
+            width_total_size = width * bytes_per_pixel * bit_depth / 8;
         }
 
         unsigned short int Recon_a(const unsigned int heightPosition, const unsigned int widthPosition) {
             if (widthPosition >= (bytes_per_pixel * ((bit_depth > 8) ? 2 : 1))) {
-                return idat_chunk_data[(heightPosition * width_total_size) + widthPosition - (bytes_per_pixel * ((bit_depth > 8) ? 2 : 1))];
+                return vector_buffer[(heightPosition * width_total_size) + widthPosition - (bytes_per_pixel * ((bit_depth > 8) ? 2 : 1))];
             } else {
                 return 0;
             }
         }
         unsigned short int Recon_b(const unsigned int heightPosition, const unsigned int widthPosition) {
             if (heightPosition > 0) {
-                return idat_chunk_data[((heightPosition - 1) * width_total_size) + widthPosition];
+                return vector_buffer[((heightPosition - 1) * width_total_size) + widthPosition];
             } else {
                 return 0;
             }
         }
         unsigned short int Recon_c(const unsigned int heightPosition, const unsigned int widthPosition) {
             if (heightPosition > 0 && widthPosition >= (bytes_per_pixel * ((bit_depth > 8) ? 2 : 1))) {
-                return idat_chunk_data[((heightPosition - 1) * width_total_size) + widthPosition - (bytes_per_pixel * ((bit_depth > 8) ? 2 : 1))];
+                return vector_buffer[((heightPosition - 1) * width_total_size) + widthPosition - (bytes_per_pixel * ((bit_depth > 8) ? 2 : 1))];
             } else {
                 return 0;
             }
@@ -235,55 +233,131 @@ class PNG {
             else return diferenceC;
         }
 
-        void read_IDAT(){
+        void read_IDAT() {
             unsigned int expected_size;
             if (color_type != 3) {
-                expected_size = height * ((width * bytes_per_pixel * bit_depth / 8) + 1) + 1;
+                expected_size = height * ((width * bytes_per_pixel * bit_depth / 8) + 1);
             } else {
                 expected_size = height * ((width * bit_depth / 8) + 1);
             }
 
-            idat_chunk_data = descomprimir(idat_chunk_data, expected_size); 
+            vector_buffer.reserve(height * width_total_size);
 
             { // Start reverse filter block
+                idat_chunk_data = descomprimir(idat_chunk_data, expected_size);
+
                 unsigned int index = 0;
                 unsigned short int filter_method, pixel_x;
-
                 for (unsigned int h = 0; h < height; h++) {
                     filter_method = idat_chunk_data[index];
 
                     index++;
-                    for (unsigned int w = 0; w < width_total_size-1; w++) {
-                        
+                    for (unsigned int w = 0; w < width_total_size; w++) {       
                         switch (filter_method) {
                             case 0:
+                                vector_buffer.push_back( idat_chunk_data[index] );
                                 break;
                             case 1:
                                 pixel_x = idat_chunk_data[index];
-                                idat_chunk_data[index] = static_cast<unsigned char>( pixel_x + Recon_a(h, w) );
+                                vector_buffer.push_back( static_cast<unsigned char>( pixel_x + Recon_a(h, w) ) );
                                 break;
                             case 2:
                                 pixel_x = idat_chunk_data[index];
-                                idat_chunk_data[index] = static_cast<unsigned char>( pixel_x + Recon_b(h, w) );
+                                vector_buffer.push_back( static_cast<unsigned char>( pixel_x + Recon_b(h, w) ) );
                                 break;
                             case 3:
                                 pixel_x = idat_chunk_data[index];
-                                idat_chunk_data[index] = static_cast<unsigned char>( pixel_x + floor(( Recon_a(h, w) + Recon_b(h, w)) / 2) );
+                                vector_buffer.push_back( static_cast<unsigned char>( pixel_x + floor(( Recon_a(h, w) + Recon_b(h, w)) / 2) ) );
                                 break;
                             case 4:
                                 pixel_x = idat_chunk_data[index];
-                                idat_chunk_data[index] = static_cast<unsigned char>( pixel_x + Paeth(Recon_a(h, w), Recon_b(h, w), Recon_c(h, w)) );
+                                vector_buffer.push_back( static_cast<unsigned char>( pixel_x + Paeth(Recon_a(h, w), Recon_b(h, w), Recon_c(h, w)) ) );
                                 break;
                             default: 
                                 throw invalid_PNG_chunk();
                         }
-
                         index++;
                     }
                 };
+                idat_chunk_data.clear();
             } // End reverse filter block
 
-            
+            { // Start Bit convert
+                pixels.reserve(height * width);
+
+                unsigned int index = 0;
+                unsigned short int* buffer;
+                unsigned short int max_bit_number = pow(2, bit_depth);
+                unsigned char mask = (1u << bit_depth) - 1u;
+
+                for (unsigned int h = 0; h < height; h++) {
+
+                    vector<unsigned short int> multiple_bit;
+                    multiple_bit.reserve(width);
+
+                    for (unsigned int w = 0; w < (width * bytes_per_pixel); w++) {
+                        if (bit_depth > 8) { // Images with 16 bit depth
+                            buffer = new unsigned short int[bytes_per_pixel];
+
+                            for (unsigned short int pixel_index = 0; pixel_index < bytes_per_pixel; pixel_index++) {
+                                buffer[pixel_index] = (vector_buffer[index] << 8) | vector_buffer[index+1];
+                                index+=2;
+                            }
+                            
+                            pixels.push_back( buffer );
+
+                        } else { // Images with 8 bit depth or less
+                            
+                            if (color_type == 3) { // Images with color palet
+                                for (unsigned int bit_index = 0; bit_index < (8/bit_depth); bit_index++) {
+                                    // Position of pixel in Color Palet (PLTE)
+                                    unsigned short int palet_index = vector_buffer[index] & (mask << (bit_index * bit_depth));
+                                    buffer = new unsigned short int[3];
+
+                                    cout << palet_index << " " << static_cast<unsigned int>(vector_buffer[index]) << endl;
+
+                                    buffer[0] = color_palet[palet_index][0]; // R
+                                    buffer[1] = color_palet[palet_index][1]; // G
+                                    buffer[2] = color_palet[palet_index][2]; // B
+
+                                    pixels.push_back( buffer );
+                                }
+                            } else { // All other colors type
+
+                                for (unsigned int bit_index = 0; bit_index < (8/bit_depth); bit_index++) {
+                                    // The pixel in format of bit_depth
+                                    unsigned short int bit_pixel = vector_buffer[index] & (mask << (bit_index * bit_depth));
+                                    
+                                    multiple_bit.push_back((bit_pixel + 1) * (256 / max_bit_number) - 1); // Convert any bit_depth pixel to 8 bit
+                                }
+                            }
+                            index++;
+                        }
+                    }
+
+                    if (bit_depth <= 8 && color_type != 3) {
+                        
+                        for (unsigned int bit_index = 0; bit_index < multiple_bit.size();) {
+
+                            buffer = new unsigned short int[bytes_per_pixel];
+
+                            for (unsigned short int pixel_index = 0; pixel_index < bytes_per_pixel; pixel_index++){
+
+                                if (multiple_bit.size() <= bit_index) break;
+                                
+                                buffer[pixel_index] = multiple_bit[bit_index];
+
+                                bit_index++;
+                            }
+
+                            pixels.push_back( buffer );
+                        }
+                    }
+                    multiple_bit.clear();
+                }
+                
+            } // End Bit convert
+
         } // End Read_IDAT function
 }; // End of class PNG
 

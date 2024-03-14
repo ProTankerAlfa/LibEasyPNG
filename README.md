@@ -4,3 +4,4 @@
 # Dependencias
  - https://github.com/madler/zlib
  - https://github.com/ebiggers/libdeflate
+ - https://github.com/google/zopfli (implementação futura)
